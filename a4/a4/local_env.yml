@@ -8,9 +8,10 @@ dependencies:
   - scipy
   - tqdm
   - docopt
-  - pytorch
+  # - cudatoolkit
+  # - pytorch
   - nltk
-  - torchvision
+  # - torchvision
   - pip
   - pip:
     - sentencepiece
