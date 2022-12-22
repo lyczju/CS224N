@@ -42,7 +42,7 @@ device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 # (that is, the same mapping from character to integer, and we build the 
 # vocab from the pretraining corpus.)
 block_size = 128
-text = open(args.pretrain_corpus_path).read()
+text = open(args.pretrain_corpus_path, 'r', encoding='utf-8').read()
 pretrain_dataset = dataset.CharCorruptionDataset(text, block_size)
 
 # We don't suggest you change these hyperparameters, as they're known to work.
@@ -55,9 +55,12 @@ Don't change above here; write your code below
 """
 
 if args.variant == 'vanilla':
-    pass # TODO [part c]: Make some model here
+    # TODO [part c]: Make some model here
+    my_model = model.GPT(mconf)
 elif args.variant == 'synthesizer':
-    pass # TODO [part g]: Make some other model here
+    # TODO [part g]: Make some other model here
+    mconf.synthesizer = True
+    my_model = model.GPT(mconf)
 
 # From here on, your code should be identical independent of which
 # variant (vanilla or synthesizer) has been chosen.
@@ -80,7 +83,22 @@ if args.function == 'pretrain':
     #     warmup_tokens=512*20
     #     final_tokens=200*len(pretrain_dataset)*block_size
     #     num_workers=4
-    raise NotImplementedError
+
+    # raise NotImplementedError
+
+    tconf = trainer.TrainerConfig(
+        max_epochs=650, 
+        batch_size=128, 
+        learning_rate=6e-3,
+        lr_decay=True, 
+        warmup_tokens=512*20, 
+        final_tokens=200*len(pretrain_dataset)*block_size,
+        num_workers=4
+    )
+    my_trainer = trainer.Trainer(my_model, pretrain_dataset, None, tconf)
+    my_trainer.train()
+    torch.save(my_model.state_dict(), args.writing_params_path)
+    
 elif args.function == 'finetune':
     assert args.writing_params_path is not None
     assert args.finetune_corpus_path is not None
@@ -112,12 +130,42 @@ elif args.function == 'finetune':
     #         warmup_tokens=512*20
     #         final_tokens=200*len(pretrain_dataset)*block_size
     #         num_workers=4
-    raise NotImplementedError
+    # raise NotImplementedError
+
+    if args.reading_params_path is None:
+        tconf = trainer.TrainerConfig(
+            max_epochs=75,
+            batch_size=256,
+            learning_rate=6e-4,
+            lr_decay=True,
+            warmup_tokens=512*20,
+            final_tokens=200*len(pretrain_dataset)*block_size,
+            num_workers=4
+        )
+    else:
+        my_model.load_state_dict(torch.load(args.reading_params_path))
+        my_model = my_model.to(device)
+        tconf = trainer.TrainerConfig(
+            max_epochs=10,
+            batch_size=256,
+            learning_rate=6e-4,
+            lr_decay=True,
+            warmup_tokens=512*20,
+            final_tokens=200*len(pretrain_dataset)*block_size,
+            num_workers=4
+        )
+    finetune_text = open(args.finetune_corpus_path, 'r').read()
+    finetune_dataset = dataset.NameDataset(pretrain_dataset, finetune_text)
+    my_trainer = trainer.Trainer(my_model, finetune_dataset, None, tconf)
+    my_trainer.train()
+    torch.save(my_model.state_dict(), args.writing_params_path)
+
 elif args.function == 'evaluate':
     assert args.outputs_path is not None
     assert args.reading_params_path is not None
     assert args.eval_corpus_path is not None
-    model.load_state_dict(torch.load(args.reading_params_path))
+    my_model.load_state_dict(torch.load(args.reading_params_path))
+    my_model.to(device)
     correct = 0
     total = 0
     with open(args.outputs_path, 'w') as fout:
@@ -126,7 +174,7 @@ elif args.function == 'evaluate':
             x = line.split('\t')[0]
             x = x + '⁇'
             x = torch.tensor([pretrain_dataset.stoi[s] for s in x], dtype=torch.long)[None,...].to(device)
-            pred = utils.sample(model, x, 32, sample=False)[0]
+            pred = utils.sample(my_model, x, 32, sample=False)[0]
             completion = ''.join([pretrain_dataset.itos[int(i)] for i in pred])
             pred = completion.split('⁇')[1]
             predictions.append(pred)
